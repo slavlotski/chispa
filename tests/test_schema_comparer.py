@@ -12,14 +12,31 @@ from pyspark.sql.types import (
     StructType,
 )
 
+from chispa.bcolors import bcolors
+from chispa.common_enums import OutputFormat
 from chispa.schema_comparer import (
     SchemasNotEqualError,
+    _are_fields_shallow_equal,
+    _compare_array_types,
+    _compare_map_types,
     are_schemas_equal,
     are_structfields_equal,
     assert_schema_equality,
     assert_schema_equality_ignore_nullable,
     create_schema_comparison_tree,
+    print_schema_diff,
 )
+
+
+def _tree_line(tree: str, needle: str) -> str:
+    """Return the single line of a comparison tree containing `needle`.
+
+    Both schemas are printed side by side on one line, which is colored red when they
+    differ and blue when they match, so the color of the line is the actual assertion.
+    """
+    matches = [line for line in tree.split("\n") if needle in line]
+    assert len(matches) == 1, f"expected exactly one line containing {needle!r}, found {len(matches)}"
+    return matches[0]
 
 
 def describe_assert_schema_equality():
@@ -923,3 +940,123 @@ def describe_are_schemas_equal():
         s1 = StructType([StructField("m", MapType(StringType(), IntegerType(), True), True)])
         s2 = StructType([StructField("m", MapType(StringType(), IntegerType(), False), True)])
         assert are_schemas_equal(s1, s2, ignore_nullable=True) is True
+
+
+def describe_print_schema_diff():
+    def it_prints_a_table(capsys):
+        s1 = StructType([StructField("name", StringType(), True)])
+        s2 = StructType([StructField("nombre", StringType(), True)])
+        print_schema_diff(s1, s2, ignore_nullable=False, ignore_metadata=False)
+        captured = capsys.readouterr()
+        assert "schema1" in captured.out
+        assert "schema2" in captured.out
+
+    def it_prints_a_tree(capsys):
+        s1 = StructType([StructField("name", StringType(), True)])
+        s2 = StructType([StructField("nombre", StringType(), True)])
+        print_schema_diff(s1, s2, ignore_nullable=False, ignore_metadata=False, output_format=OutputFormat.TREE)
+        captured = capsys.readouterr()
+        assert "|-- name: string" in captured.out
+        assert "|-- nombre: string" in captured.out
+
+    def it_throws_with_an_unknown_output_format():
+        s1 = StructType([StructField("name", StringType(), True)])
+        s2 = StructType([StructField("name", StringType(), True)])
+        with pytest.raises(ValueError):
+            print_schema_diff(s1, s2, ignore_nullable=False, ignore_metadata=False, output_format="invalid")
+
+
+def describe_create_schema_comparison_tree():
+    def it_handles_empty_schemas():
+        result = create_schema_comparison_tree(StructType([]), StructType([]), False, False)
+        assert "schema1" in result
+        assert "schema2" in result
+
+    def it_marks_leaf_types_with_different_type_names_as_unequal():
+        s1 = StructType([StructField("num", IntegerType(), True)])
+        s2 = StructType([StructField("num", StringType(), True)])
+        line = _tree_line(create_schema_comparison_tree(s1, s2, False, False), "|-- num: int")
+        assert "|-- num: string" in line
+        assert line.startswith(bcolors.LightRed)
+
+    def it_marks_fields_with_different_nullability_as_unequal():
+        s1 = StructType([StructField("name", StringType(), True)])
+        s2 = StructType([StructField("name", StringType(), False)])
+        line = _tree_line(create_schema_comparison_tree(s1, s2, False, False), "|-- name: string")
+        assert "(nullable = true)" in line
+        assert "(nullable = false)" in line
+        assert line.startswith(bcolors.LightRed)
+
+    def it_marks_maps_with_different_key_types_as_unequal():
+        s1 = StructType([StructField("m", MapType(StringType(), IntegerType(), True), True)])
+        s2 = StructType([StructField("m", MapType(IntegerType(), IntegerType(), True), True)])
+        result = create_schema_comparison_tree(s1, s2, False, False)
+        key_line = _tree_line(result, "|-- key:")
+        assert "|-- key: string" in key_line
+        assert "|-- key: int" in key_line
+        assert key_line.startswith(bcolors.LightRed)
+        # only the key type differs, so the value line is still marked as equal
+        assert _tree_line(result, "|-- value:").startswith(bcolors.LightBlue)
+
+
+def describe_are_fields_shallow_equal():
+    def it_returns_true_when_both_fields_are_missing():
+        assert _are_fields_shallow_equal(None, None, False, False) is True
+
+    def it_returns_false_when_only_one_field_is_missing():
+        sf = StructField("name", StringType(), True)
+        assert _are_fields_shallow_equal(sf, None, False, False) is False
+
+
+def describe_compare_array_types():
+    def it_marks_the_element_line_as_unequal_when_one_side_is_missing():
+        lines: list[tuple[str, str, bool]] = []
+        _compare_array_types(ArrayType(StringType(), True), None, False, False, 0, lines)
+        assert len(lines) == 1
+        left, right, is_equal = lines[0]
+        assert "|-- element: string" in left
+        assert right == ""
+        assert is_equal is False
+
+
+def describe_compare_map_types():
+    def it_marks_the_key_and_value_lines_as_unequal_when_one_side_is_missing():
+        lines: list[tuple[str, str, bool]] = []
+        _compare_map_types(None, MapType(StringType(), IntegerType(), True), False, False, 0, lines)
+        assert len(lines) == 2
+        key_line, value_line = lines
+        assert key_line[0] == ""
+        assert "|-- key: string" in key_line[1]
+        assert key_line[2] is False
+        assert value_line[0] == ""
+        assert "|-- value: int" in value_line[1]
+        assert value_line[2] is False
+
+
+def describe_handle_schemas_not_equal():
+    def it_uses_a_tree_for_wide_schemas():
+        s1 = StructType([StructField("nums", ArrayType(IntegerType(), True), True)])
+        s2 = StructType([StructField("nums", ArrayType(StringType(), True), True)])
+        with pytest.raises(SchemasNotEqualError) as exc_info:
+            assert_schema_equality(s1, s2)
+        assert "|-- element: int" in str(exc_info.value)
+
+
+def describe_assert_schema_equality_full():
+    def it_throws_when_schema_lengths_differ_and_nullability_is_ignored():
+        s1 = StructType([StructField("name", StringType(), True)])
+        s2 = StructType([
+            StructField("name", StringType(), False),
+            StructField("age", IntegerType(), True),
+        ])
+        with pytest.raises(SchemasNotEqualError):
+            assert_schema_equality(s1, s2, ignore_nullable=True)
+
+
+def describe_are_structfields_equal_with_missing_fields():
+    def it_returns_true_when_both_are_none_and_nullability_is_ignored():
+        assert are_structfields_equal(None, None, ignore_nullability=True) is True
+
+    def it_returns_false_when_only_one_is_none_and_nullability_is_ignored():
+        sf = StructField("name", StringType(), True)
+        assert are_structfields_equal(sf, None, ignore_nullability=True) is False

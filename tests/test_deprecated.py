@@ -5,11 +5,16 @@ from dataclasses import dataclass
 
 import pytest
 from pyspark.sql import SparkSession
+from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
 from chispa import DataFramesNotEqualError, assert_basic_rows_equality
 from chispa.bcolors import bcolors, blue, underline_text
 from chispa.default_formats import DefaultFormats
 from chispa.formatting import FormattingConfig
+from chispa.schema_comparer import (
+    are_datatypes_equal_ignore_nullable,
+    are_schemas_equal_ignore_nullable,
+)
 
 
 def test_default_formats_deprecation_warning():
@@ -66,6 +71,20 @@ def test_invalid_value_in_default_formats():
 
     with pytest.raises(ValueError):
         FormattingConfig._from_arbitrary_dataclass(InvalidFormats())
+
+
+def test_are_schemas_equal_ignore_nullable_deprecation():
+    s1 = StructType([StructField("name", StringType(), True)])
+    s2 = StructType([StructField("name", StringType(), False)])
+    with pytest.warns(DeprecationWarning, match="are_schemas_equal_ignore_nullable is deprecated"):
+        assert are_schemas_equal_ignore_nullable(s1, s2) is True
+
+
+def test_are_datatypes_equal_ignore_nullable_deprecation():
+    dt1 = ArrayType(StringType(), True)
+    dt2 = ArrayType(StringType(), False)
+    with pytest.warns(DeprecationWarning, match="are_datatypes_equal_ignore_nullable is deprecated"):
+        assert are_datatypes_equal_ignore_nullable(dt1, dt2) is True
 
 
 def test_bcolors_deprecation():

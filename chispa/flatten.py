@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+from pyspark.sql import DataFrame
 from pyspark.sql.functions import col, explode_outer, map_keys
-from pyspark.sql.types import ArrayType, MapType, StructType
-
-if TYPE_CHECKING:
-    from pyspark.sql import DataFrame
-    from pyspark.sql.types import DataType
+from pyspark.sql.types import ArrayType, DataType, MapType, StructType
 
 
 def _complex_fields(schema: StructType) -> dict[str, DataType]:
@@ -33,7 +28,7 @@ def flatten_dataframe(df: DataFrame, sep: str = "_") -> DataFrame:
         elif isinstance(dtype, ArrayType):
             df = df.withColumn(col_name, explode_outer(col_name))
 
-        elif isinstance(dtype, MapType):
+        elif isinstance(dtype, MapType):  # pragma: no branch — _complex_fields yields only these three types
             keys_rows = df.select(explode_outer(map_keys(col(col_name))).alias("k")).distinct().collect()
             keys = [row["k"] for row in keys_rows if row["k"] is not None]
             key_cols = [col(col_name).getItem(k).alias(f"{col_name}{sep}{k}") for k in keys]

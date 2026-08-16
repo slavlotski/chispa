@@ -74,6 +74,12 @@ def test_invalid_style():
     )
 
 
+def test_invalid_format_type():
+    with pytest.raises(ValueError) as exc_info:
+        FormattingConfig(mismatched_rows=["red"])
+    assert str(exc_info.value) == "Invalid format type. Must be Format or dict."
+
+
 def test_invalid_key():
     try:
         FormattingConfig(mismatched_rows={"invalid_key": "value"})

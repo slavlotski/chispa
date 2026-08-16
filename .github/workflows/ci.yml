@@ -46,6 +46,23 @@ jobs:
       - name: Run tests
         run: poetry run pytest tests
 
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-poetry-env
+        with:
+          # Pin a version the `test` matrix also covers, so coverage is never
+          # measured against a pyspark the suite is not otherwise run on.
+          pyspark-version: "4.0.2"
+
+      # Fails when coverage drops below the `fail_under` set in pyproject.toml.
+      - name: Run tests with coverage
+        run: poetry run make test
+
   check-docs:
     runs-on: ubuntu-latest
     steps:

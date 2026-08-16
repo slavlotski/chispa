@@ -189,7 +189,7 @@ def _compare_datatypes(
             _compare_struct_fields(dt1, dt2, ignore_nullable, ignore_metadata, indent, lines)
         elif tn1 == TypeName.ARRAY:
             _compare_array_types(dt1, dt2, ignore_nullable, ignore_metadata, indent, lines)
-        elif tn1 == TypeName.MAP:
+        elif tn1 == TypeName.MAP:  # pragma: no branch — tn1 is already known to be in _COMPLEX_TYPES
             _compare_map_types(dt1, dt2, ignore_nullable, ignore_metadata, indent, lines)
         return
 

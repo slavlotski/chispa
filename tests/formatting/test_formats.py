@@ -97,3 +97,29 @@ def test_format_from_list_empty():
     format_instance = Format.from_list(values)
     assert format_instance.color is None
     assert format_instance.style is None
+
+
+def test_format_from_dict_non_dict_input():
+    with pytest.raises(ValueError) as exc_info:
+        Format.from_dict("blue")
+    assert str(exc_info.value) == "Input must be a dictionary"
+
+
+def test_format_from_dict_color_as_list():
+    with pytest.raises(TypeError) as exc_info:
+        Format.from_dict({"color": ["blue"]})
+    assert str(exc_info.value) == "The value for key 'color' should be a string, not a list!"
+
+
+def test_format_from_dict_with_enum_members():
+    format_instance = Format.from_dict({"color": Color.GREEN, "style": Style.BOLD})
+    assert format_instance.color == Color.GREEN
+    assert format_instance.style == [Style.BOLD]
+
+
+def test_get_color_enum_returns_none_for_non_string():
+    assert Format._get_color_enum(None) is None
+
+
+def test_get_style_enum_returns_none_for_non_string():
+    assert Format._get_style_enum(None) is None

@@ -1,14 +1,26 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 
 import pytest
 from pyspark.sql import SparkSession
 from pyspark.sql.types import ArrayType, IntegerType, MapType, StringType, StructField, StructType
 
 from chispa import DataFramesNotEqualError, assert_approx_df_equality, assert_df_equality
-from chispa.dataframe_comparer import are_dfs_equal
+from chispa.dataframe_comparer import _contains_map_type, are_dfs_equal
+from chispa.formatting import Color, FormattingConfig
 from chispa.schema_comparer import SchemasNotEqualError
+
+
+@dataclass
+class ArbitraryFormats:
+    """Deliberately uses colors that differ from the built-in defaults, so the output can be told apart."""
+
+    mismatched_rows: list[str] = field(default_factory=lambda: ["green"])
+    matched_rows: list[str] = field(default_factory=lambda: ["cyan"])
+    mismatched_cells: list[str] = field(default_factory=lambda: ["purple"])
+    matched_cells: list[str] = field(default_factory=lambda: ["yellow"])
 
 
 def describe_assert_df_equality():
@@ -242,6 +254,16 @@ def describe_assert_df_equality():
         with pytest.raises(DataFramesNotEqualError):
             assert assert_df_equality(df1, df2, ignore_columns=["name"])
 
+    def it_converts_an_arbitrary_dataclass_to_a_formatting_config(spark: SparkSession):
+        df1 = spark.createDataFrame([(1, "jose"), (2, "li")], ["num", "expected_name"])
+        df2 = spark.createDataFrame([(1, "jose"), (2, "laura")], ["num", "expected_name"])
+        with pytest.raises(DataFramesNotEqualError) as exc_info:
+            assert_df_equality(df1, df2, formats=ArbitraryFormats())
+        message = str(exc_info.value)
+        assert Color.PURPLE.value in message
+        assert Color.YELLOW.value in message
+        assert Color.RED.value not in message
+
     def it_works_when_sorting_and_dropping_columns(spark: SparkSession):
         data1 = [("b", "jose", 10), ("a", "jose", 20)]
         df1 = spark.createDataFrame(data1, ["ignore_me", "name", "score"])
@@ -344,3 +366,64 @@ def describe_assert_approx_df_equality():
         data2 = [((1.1, "li"),), ((1.0, "jose"),)]
         df2 = spark.createDataFrame(data2, ["person"])
         assert_approx_df_equality(df1, df2, 0.1, ignore_row_order=True)
+
+    def it_converts_an_arbitrary_dataclass_to_a_formatting_config(spark: SparkSession):
+        df1 = spark.createDataFrame([(1.0, "jose"), (2.0, "li")], ["num", "expected_name"])
+        df2 = spark.createDataFrame([(1.0, "jose"), (2.0, "laura")], ["num", "expected_name"])
+        with pytest.raises(DataFramesNotEqualError) as exc_info:
+            assert_approx_df_equality(df1, df2, 0.1, formats=ArbitraryFormats())
+        message = str(exc_info.value)
+        assert Color.PURPLE.value in message
+        assert Color.CYAN.value in message
+        assert Color.RED.value not in message
+
+    def it_keeps_a_formatting_config_as_is(spark: SparkSession):
+        data = [(1.0, "jose"), (1.1, "li")]
+        df1 = spark.createDataFrame(data, ["num", "expected_name"])
+        df2 = spark.createDataFrame(data, ["num", "expected_name"])
+        assert_approx_df_equality(df1, df2, 0.1, formats=FormattingConfig(mismatched_rows={"color": "green"}))
+
+    def it_does_not_throw_on_schema_column_order_mismatch_with_transforms(spark: SparkSession):
+        data = [(1.0, "jose"), (1.1, "li")]
+        df1 = spark.createDataFrame(data, ["num", "expected_name"])
+        df2 = spark.createDataFrame([(v, n) for n, v in data], ["expected_name", "num"])
+        assert_approx_df_equality(df1, df2, 0.1, transforms=[lambda df: df.select(sorted(df.columns))])
+
+    def it_falls_back_to_exact_comparison_with_zero_precision(spark: SparkSession):
+        data = [(1.0, "jose"), (1.1, "li")]
+        df1 = spark.createDataFrame(data, ["num", "expected_name"])
+        df2 = spark.createDataFrame(data, ["num", "expected_name"])
+        assert_approx_df_equality(df1, df2, 0)
+
+    def it_throws_with_zero_precision_and_a_content_mismatch(spark: SparkSession):
+        df1 = spark.createDataFrame([(1.0, "jose")], ["num", "expected_name"])
+        df2 = spark.createDataFrame([(1.1, "jose")], ["num", "expected_name"])
+        with pytest.raises(DataFramesNotEqualError):
+            assert_approx_df_equality(df1, df2, 0)
+
+    def it_can_consider_nan_values_equal_with_zero_precision(spark: SparkSession):
+        data = [(1.0, "jose"), (float("nan"), "li")]
+        df1 = spark.createDataFrame(data, ["num", "expected_name"])
+        df2 = spark.createDataFrame(data, ["num", "expected_name"])
+        assert_approx_df_equality(df1, df2, 0, allow_nan_equality=True)
+
+    def it_throws_with_zero_precision_nan_equality_and_a_content_mismatch(spark: SparkSession):
+        df1 = spark.createDataFrame([(float("nan"), "jose")], ["num", "expected_name"])
+        df2 = spark.createDataFrame([(float("nan"), "li")], ["num", "expected_name"])
+        with pytest.raises(DataFramesNotEqualError):
+            assert_approx_df_equality(df1, df2, 0, allow_nan_equality=True)
+
+
+def describe_contains_map_type():
+    def it_returns_false_for_a_non_complex_type():
+        assert _contains_map_type(IntegerType()) is False
+
+    def it_returns_true_for_a_map_nested_in_an_array():
+        assert _contains_map_type(ArrayType(MapType(StringType(), IntegerType()))) is True
+
+    def it_returns_false_for_an_array_without_maps():
+        assert _contains_map_type(ArrayType(ArrayType(IntegerType()))) is False
+
+    def it_returns_true_for_a_map_nested_in_a_struct():
+        dt = StructType([StructField("m", MapType(StringType(), IntegerType()), True)])
+        assert _contains_map_type(dt) is True

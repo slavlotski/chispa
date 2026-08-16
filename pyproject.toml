@@ -81,6 +81,14 @@ strict = true
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
 
+[tool.coverage.run]
+source = ["chispa"]
+branch = true
+
+[tool.coverage.report]
+# The suite covers every statement and branch; keep it that way.
+fail_under = 100
+
 [tool.mypy]
 files = ["chispa"]
 explicit_package_bases = true
