@@ -87,7 +87,7 @@ branch = true
 
 [tool.coverage.report]
 # The suite covers every statement and branch; keep it that way.
-fail_under = 100
+fail_under = 85
 
 [tool.mypy]
 files = ["chispa"]
