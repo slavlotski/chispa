@@ -19,6 +19,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up python
+      id: setup-python
       uses: actions/setup-python@v4
       with:
         python-version: ${{ inputs.python-version }}
@@ -43,8 +44,13 @@ runs:
       uses: actions/cache@v3
       with:
         path: .venv
-        key: venv-${{ runner.os }}-${{ inputs.python-version }}-${{ inputs.pyspark-version }}-${{ inputs.with-docs }}-${{ hashFiles('poetry.lock') }}
+        # Key on the resolved patch version, not the `3.11` input. A venv symlinks
+        # its interpreter, so when the runner image bumps its Python patch the cached
+        # venv points at a path that no longer exists and poetry discards it.
+        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ inputs.pyspark-version }}-${{ inputs.with-docs }}-${{ hashFiles('poetry.lock') }}
 
+    # Runs unconditionally: on a cache hit this is a fast no-op, and it repairs the
+    # venv if poetry had to recreate it. Skipping it on a hit leaves an empty venv.
     - name: Install dependencies
       run: |
         if [[ "${{ inputs.with-docs }}" == "true" ]]; then
@@ -54,7 +60,6 @@ runs:
         fi
         poetry run pip install pyspark==${{ inputs.pyspark-version }}
       shell: bash
-      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
 
     - name: Print python and pyspark version
       run: |
